@@ -5,7 +5,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 using WatchDog_Background.Model.TcpServer;
 using WatchDog_Background.ProcessManager;
@@ -14,31 +13,32 @@ namespace WatchDog_Background.TcpServer
 {
     public class TcpServer
     {
-        private readonly int port;
-        private readonly ProcessManage processManager;
-        private readonly ConcurrentDictionary<TcpClient, bool> clientSendFlags = new ConcurrentDictionary<TcpClient, bool>();
+        private readonly int _port;
+        private readonly ProcessManage _processManager;
+        private readonly ConcurrentDictionary<TcpClient, bool> _clientSendFlags = new ConcurrentDictionary<TcpClient, bool>();
 
         public TcpServer(int port)
         {
-            this.port = port;
-            this.processManager = ProcessManage.GetInstance();
+            this._port = port;
+            this._processManager = ProcessManage.GetInstance();
         }
 
         public void Start()
         {
-            Task.Run(() =>
+            Task.Run(function: () =>
             {
-                TcpListener server = new TcpListener(IPAddress.Any, port);
+                TcpListener server = new TcpListener(IPAddress.Any, _port);
                 server.Start();
-                Console.WriteLine($"TCP 서버가 {port} 포트에서 시작되었습니다.");
+                Console.WriteLine($"TCP 서버가 {_port} 포트에서 시작되었습니다.");
 
                 while (true)
                 {
                     var client = server.AcceptTcpClient();
                     Console.WriteLine("클라이언트 연결됨.");
-                    clientSendFlags[client] = false; // 초기 상태는 전송 중지
+                    _clientSendFlags[client] = false; // 초기 상태는 전송 중지
                     Task.Run(() => HandleClient(client));
                 }
+                // ReSharper disable once FunctionNeverReturns
             });
         }
 
@@ -84,16 +84,15 @@ namespace WatchDog_Background.TcpServer
                     }
 
                     // `send`가 true인 경우 상태를 주기적으로 전송
-                    if (clientSendFlags[client])
+                    if (_clientSendFlags[client])
                     {
-                        var statuses = processManager.GetProcessStatusesForClient();
+                        var statuses = _processManager.GetProcessStatusesForClient();
                         var jsonResponse = JsonSerializer.Serialize(new ServerResponse
                         {
                             Status = "success",
                             Data = statuses
                         });
                         await writer.WriteLineAsync(jsonResponse);
-                        Console.WriteLine($"자동 전송: {jsonResponse}");
                         await Task.Delay(2000); // 2초 간격으로 상태 전송
                     }
                 }
@@ -109,7 +108,7 @@ namespace WatchDog_Background.TcpServer
             finally
             {
                 // 클라이언트 연결 종료
-                clientSendFlags.TryRemove(client, out _);
+                _clientSendFlags.TryRemove(client, out _);
                 client.Close();
                 Console.WriteLine("클라이언트 연결 종료됨.");
             }
@@ -123,16 +122,16 @@ namespace WatchDog_Background.TcpServer
             {
                 case 1001: // 상태 조회 및 send 제어
                     Console.WriteLine("프로그램 상태 조회 요청 처리 중...");
-                    clientSendFlags[client] = command.Send; // send 값 업데이트
+                    _clientSendFlags[client] = command.Send; // send 값 업데이트
                     return new ServerResponse
                     {
                         Status = "success",
-                        Message = command.Send ? "상태 전송 시작" : "상태 전송 중지"
+                        Message = command.Send ? "Status transmission started" : "Status transmission stopped"
                     };
 
                 case 1002: // 실행/중지/삭제
                     Console.WriteLine($"명령: {command.Command}, 프로그램 이름: {command.ProgramName}");
-                    var message = processManager.HandleCommand(
+                    var message = _processManager.HandleCommand(
                         command.ProgramName,
                         command.Command,
                         command.AutoRestart,
@@ -143,7 +142,7 @@ namespace WatchDog_Background.TcpServer
 
                 case 1003: // 프로그램 추가
                     Console.WriteLine($"프로그램 추가 요청: {command.FilePath}");
-                    bool added = processManager.AddProcess(
+                    bool added = _processManager.AddProcess(
                         command.FilePath,
                         command.ProgramName, 
                         command.AutoRestart,
@@ -153,7 +152,7 @@ namespace WatchDog_Background.TcpServer
                     return new ServerResponse
                     {
                         Status = added ? "success" : "failure",
-                        Message = added ? "프로그램 추가 성공" : "프로그램 추가 실패"
+                        Message = added ? "Program added successfully" : "Program addition failed"
                     };
 
                 default:

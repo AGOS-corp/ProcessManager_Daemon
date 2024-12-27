@@ -17,7 +17,7 @@ namespace WatchDog_Background
             const int serverPort = 5000;
             TcpServer.TcpServer tcpServer = new TcpServer.TcpServer(serverPort);
             tcpServer.Start();
-
+            processManage.LoadProcessesFromJson();
             // WatchDog 프로세스 모니터링 시작
             processManage.StartMonitoring();
 

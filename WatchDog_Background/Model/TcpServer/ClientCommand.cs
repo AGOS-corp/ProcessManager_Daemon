@@ -10,13 +10,13 @@ namespace WatchDog_Background.Model.TcpServer
         [JsonPropertyName("program_name")]
         public string ProgramName { get; set; } // 프로그램 이름
 
-        [JsonPropertyName("FilePath")]
+        [JsonPropertyName("filePath")]
         public string FilePath { get; set; } // 파일 경로
 
-        [JsonPropertyName("AutoRestart")]
+        [JsonPropertyName("autoRestart")]
         public bool AutoRestart { get; set; } // 자동 재시작 여부
 
-        [JsonPropertyName("RestartInterval")]
+        [JsonPropertyName("restartInterval")]
         public int RestartInterval { get; set; } // 재시작 주기
 
         [JsonPropertyName("start_immediately")]

@@ -77,6 +77,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Model\ProcessStatus.cs" />
+    <Compile Include="Model\ProcState.cs" />
     <Compile Include="Model\TcpServer\ClientCommand.cs" />
     <Compile Include="Model\TcpServer\ServerResponse.cs" />
     <Compile Include="Model\WatchedProcess.cs" />
