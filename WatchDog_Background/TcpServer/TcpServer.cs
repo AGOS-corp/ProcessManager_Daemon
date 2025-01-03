@@ -93,7 +93,7 @@ namespace WatchDog_Background.TcpServer
                             Data = statuses
                         });
                         await writer.WriteLineAsync(jsonResponse);
-                        await Task.Delay(2000); // 2초 간격으로 상태 전송
+                        await Task.Delay(1000); // 0.1초 간격으로 상태 전송
                     }
                 }
             }

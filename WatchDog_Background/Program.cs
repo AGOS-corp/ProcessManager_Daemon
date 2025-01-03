@@ -14,7 +14,7 @@ namespace WatchDog_Background
             ProcessManage processManage = ProcessManage.GetInstance();
 
             // TCP 서버 시작
-            const int serverPort = 5000;
+            const int serverPort = 8000;
             TcpServer.TcpServer tcpServer = new TcpServer.TcpServer(serverPort);
             tcpServer.Start();
             processManage.LoadProcessesFromJson();

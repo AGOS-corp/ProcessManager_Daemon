@@ -12,6 +12,8 @@ namespace WatchDog_Background.Model
         public int ProcessId { get; set; }
         public ProcessStatus Status { get; set; }
         public DateTime LastRunTime { get; set; } = DateTime.MinValue;
+        
+        public bool IsManuallyStopped { get; set; }
     }
 
 }

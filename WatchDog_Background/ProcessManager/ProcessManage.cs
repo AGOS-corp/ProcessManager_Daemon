@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
@@ -40,20 +41,49 @@ namespace WatchDog_Background.ProcessManager
         {
             lock (_watchedProcesses)
             {
-                return _watchedProcesses.Select(p => new
+                return _watchedProcesses.Select(p =>
                 {
-                    program_name = p.ProgramName,
-                    is_running = p.Status == ProcessStatus.Running,
-                    command = p.Status == ProcessStatus.Running ? 1 : 0,
-                    auto_restart = p.AutoRestart,
-                    restart_interval = p.RestartInterval,
-                    start_immediately = p.LastRunTime != DateTime.MinValue
+                    // 현재 실행 상태 확인
+                    bool isRunning = IsProcessRunning(p.ProcessId);
+
+                    return new
+                    {
+                        program_name = p.ProgramName,
+                        is_running = isRunning,
+                        command = isRunning ? 1 : 0,
+                        auto_restart = p.AutoRestart,
+                        restart_interval = p.RestartInterval,
+                        start_immediately = p.StartImmediately
+                    };
                 }).ToList<object>();
             }
         }
+        
+        private bool IsProcessRunning(int processId)
+        {
+            try
+            {
+                if (processId == 0) return false; // 유효하지 않은 ProcessId는 실행 중이 아님
+
+                var process = Process.GetProcessById(processId);
+                return !process.HasExited; // 프로세스가 종료되지 않았으면 실행 중
+            }
+            catch (ArgumentException)
+            {
+                // 프로세스가 이미 종료된 경우
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"프로세스 실행 상태 확인 중 오류 발생: {ex.Message}");
+                return false;
+            }
+        }
+
+
 
         public bool AddProcess(string filePath, string programName, bool autoRestart = false, int restartInterval = 60,
-            bool startImmediately = false)
+            bool startImmediately = true)
         {
             lock (_watchedProcesses)
             {
@@ -63,7 +93,7 @@ namespace WatchDog_Background.ProcessManager
                     return false;
                 }
 
-                if (_watchedProcesses.Any(p => p.FilePath == filePath))
+                if (_watchedProcesses.Any(p => p.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
                 {
                     Console.WriteLine($"프로세스 {filePath} 이미 추가됨.");
                     return false;
@@ -78,13 +108,15 @@ namespace WatchDog_Background.ProcessManager
                     ProgramName = programName,
                     AutoRestart = autoRestart,
                     RestartInterval = restartInterval,
-                    LastRunTime = DateTime.MinValue
+                    LastRunTime = DateTime.MinValue,
+                    StartImmediately = startImmediately
                 };
 
                 _watchedProcesses.Add(newProcess);
                 Console.WriteLine($"프로세스 추가됨: {filePath}, 이름: {programName}");
+                Console.WriteLine($"현재 프로세스 목록: {_watchedProcesses.Count}개");
 
-                SyncProcessesToJson();
+                SyncProcessesToJson(); // JSON 파일 동기화
 
                 if (startImmediately)
                 {
@@ -95,6 +127,8 @@ namespace WatchDog_Background.ProcessManager
                 return true;
             }
         }
+
+
 
         public string HandleCommand(string programName, int command, bool autoRestart = false, int restartInterval = 60,
             bool startImmediately = false)
@@ -107,31 +141,61 @@ namespace WatchDog_Background.ProcessManager
                 switch (command)
                 {
                     case 1: // 실행
-                        process.AutoRestart = autoRestart;
+                        process.IsManuallyStopped = false; // 수동 중지 상태 해제
                         process.RestartInterval = restartInterval;
-                        process.LastRunTime = startImmediately ? DateTime.Now : DateTime.MinValue;
                         if (StartProcess(process.FilePath)) return $"{programName} 실행 성공";
                         return $"{programName} 실행 실패";
 
                     case 2: // 중지
+                        process.IsManuallyStopped = true; // 수동 중지 상태로 설정
                         if (StopProcess(process.ProcessId)) return $"{programName} 중지 성공";
                         return $"{programName} 중지 실패";
 
                     case 3: // 삭제
-                        if (StopProcess(process.ProcessId))
-                        {
-                            _watchedProcesses.Remove(process);
-                            SyncProcessesToJson();
-                            return $"{programName} 중지,삭제 성공";
-                        }
-
-                        return $"{programName} 중지,삭제 실패";
+                        StopProcess(process.ProcessId); // 중지 시도, 실패해도 진행
+                        _watchedProcesses.Remove(process); // 목록에서 제거
+                        SyncProcessesToJson(); // 삭제 후 JSON 파일 동기화
+                        return $"{programName} 삭제 성공";
 
                     default:
                         return "알 수 없는 명령";
                 }
             }
         }
+
+
+
+        private void HandleStoppedProcess(WatchedProcess process)
+        {
+            if (process.IsManuallyStopped) 
+            {
+                Console.WriteLine($"수동으로 중지된 프로세스: {process.ProgramName}. 자동재시작 무시.");
+                return; // 수동으로 중지된 경우 자동 재시작 방지
+            }
+
+            if (!process.AutoRestart) return; // 자동 재시작이 비활성화된 경우 무시
+
+            var timeSinceLastRun = (DateTime.Now - process.LastRunTime).TotalSeconds;
+
+            if (timeSinceLastRun >= process.RestartInterval)
+            {
+                Console.WriteLine($"자동 재시작 시도: {process.ProgramName}");
+                if (StartProcess(process.FilePath))
+                {
+                    process.LastRunTime = DateTime.Now;
+                    Console.WriteLine($"프로세스 {process.ProgramName} 자동 재시작 성공");
+                }
+                else
+                {
+                    Console.WriteLine($"프로세스 {process.ProgramName} 자동 재시작 실패");
+                }
+            }
+        }
+
+
+
+
+
 
         /// <summary>
         ///     JSON 파일에 프로세스 정보를 동기화
@@ -140,16 +204,16 @@ namespace WatchDog_Background.ProcessManager
         {
             try
             {
-                var jsonData = JsonSerializer.Serialize(_watchedProcesses,
-                    new JsonSerializerOptions { WriteIndented = true });
+                var jsonData = JsonSerializer.Serialize(_watchedProcesses, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(JsonFilePath, jsonData);
-                Console.WriteLine("JSON 파일 동기화 완료.");
+                Console.WriteLine($"JSON 파일 동기화 완료. 경로: {JsonFilePath}");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"JSON 파일 동기화 실패: {ex.Message}");
             }
         }
+
 
         public void LoadProcessesFromJson()
         {
@@ -170,10 +234,19 @@ namespace WatchDog_Background.ProcessManager
                     return;
                 }
 
-                foreach (var process in processList)
-                    if (AddProcess(process.FilePath, process.ProgramName, process.AutoRestart, process.RestartInterval,
-                            process.StartImmediately))
-                        Console.WriteLine($"JSON에서 프로세스 추가됨: {process.ProgramName}");
+                lock (_watchedProcesses)
+                {
+                    _watchedProcesses.Clear(); // 기존 데이터를 모두 삭제하고 JSON에서 불러옴
+                    foreach (var process in processList)
+                    {
+                        // 중복 추가 방지
+                        if (!_watchedProcesses.Any(p => p.FilePath.Equals(process.FilePath, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            _watchedProcesses.Add(process);
+                            Console.WriteLine($"JSON에서 로드된 프로세스: {process.ProgramName}");
+                        }
+                    }
+                }
             }
             catch (JsonException ex)
             {
@@ -186,17 +259,34 @@ namespace WatchDog_Background.ProcessManager
         }
 
 
-        /// <summary>
-        ///     특정 프로세스 실행
-        /// </summary>
+
         private bool StartProcess(string filePath)
         {
             try
             {
+                // 실행 중인 프로세스 확인
+                var existingProcess = FindMatchingProcess(filePath);
+                if (existingProcess != null)
+                {
+                    Console.WriteLine($"프로세스 {filePath}는 이미 실행 중입니다 (PID: {existingProcess["ProcessId"]}).");
+            
+                    // 기존 WatchedProcess 정보 업데이트
+                    var watchedProcess = _watchedProcesses.FirstOrDefault(p => p.FilePath == filePath);
+                    if (watchedProcess != null)
+                    {
+                        watchedProcess.ProcessId = Convert.ToInt32(existingProcess["ProcessId"]);
+                        watchedProcess.LastRunTime = DateTime.Now;
+                        watchedProcess.Status = ProcessStatus.Running;
+                    }
+                    return true; // 중복 실행 방지
+                }
+
+                // 실행 중이 아닌 경우 프로세스 시작
                 var processInfo = new ProcessStartInfo
                 {
                     FileName = filePath,
-                    WorkingDirectory = Path.GetDirectoryName(filePath) ?? throw new InvalidOperationException()
+                    WorkingDirectory = Path.GetDirectoryName(filePath) ?? throw new InvalidOperationException(),
+                    UseShellExecute = true, // Windows 쉘을 통해 실행
                 };
 
                 var process = Process.Start(processInfo);
@@ -231,24 +321,44 @@ namespace WatchDog_Background.ProcessManager
         {
             try
             {
+                if (processId == 0)
+                {
+                    Console.WriteLine("중지할 유효한 ProcessId가 없습니다.");
+                    return false;
+                }
+
                 var process = Process.GetProcessById(processId);
                 process.Kill();
                 process.WaitForExit();
 
-                // ReSharper disable once InconsistentlySynchronizedField
+                // 프로세스 상태 업데이트
                 var watchedProcess = _watchedProcesses.FirstOrDefault(p => p.ProcessId == processId);
-                if (watchedProcess != null) watchedProcess.Status = ProcessStatus.Stopped;
+                if (watchedProcess != null)
+                {
+                    watchedProcess.Status = ProcessStatus.Stopped;
+                    watchedProcess.ProcessId = 0; // ProcessId 초기화
+                    watchedProcess.IsManuallyStopped = true; // 수동 중지 상태 설정
+                    Console.WriteLine($"프로세스 {watchedProcess.ProgramName} 수동 중지됨.");
+                    SyncProcessesToJson(); // 중지 후 JSON 파일 동기화
+                }
 
-                Console.WriteLine($"프로세스 {processId} 중지됨.");
                 return true;
+            }
+            catch (ArgumentException)
+            {
+                // 프로세스가 이미 종료된 경우
+                Console.WriteLine($"프로세스 {processId}는 이미 종료되었습니다.");
+                return true; // 이미 종료된 상태로 간주
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"프로세스 중지 실패: {ex.Message}");
+                return false;
             }
-
-            return false;
         }
+
+
+
 
         /// <summary>
         ///     프로세스 상태 주기적 확인
@@ -290,7 +400,7 @@ namespace WatchDog_Background.ProcessManager
                             _semaphore.Release();
                         }
 
-                        await Task.Delay(5000); // 5초 대기
+                        await Task.Delay(1000); // 0.1초 대기
                     }
                 }
             }
@@ -312,12 +422,26 @@ namespace WatchDog_Background.ProcessManager
                     var matchingProcess = FindMatchingProcess(process.FilePath);
 
                     if (matchingProcess != null)
+                    {
+                        // 프로세스가 실행 중이면 상태를 업데이트
                         UpdateRunningProcess(process, matchingProcess);
+                    }
                     else
+                    {
+                        // 실행 중이지 않으면 상태를 중지로 설정
+                        process.Status = ProcessStatus.Stopped;
+                        process.ProcessId = 0;
+
+                        // 중지된 프로세스 처리
                         HandleStoppedProcess(process);
+                    }
                 }
             }
         }
+
+
+
+
 
         /// <summary>
         ///     실행 중인 프로세스를 찾음
@@ -341,32 +465,6 @@ namespace WatchDog_Background.ProcessManager
             process.Status = ProcessStatus.Running;
             process.ProcessId = Convert.ToInt32(matchingProcess["ProcessId"]);
             Console.WriteLine($"프로세스 실행 중: {process.ProgramName}, PID: {process.ProcessId}");
-        }
-
-        /// <summary>
-        ///     중지된 프로세스를 처리
-        /// </summary>
-        /// <param name="process">WatchedProcess 객체</param>
-        private void HandleStoppedProcess(WatchedProcess process)
-        {
-            if (process.Status == ProcessStatus.Running) Console.WriteLine($"프로세스 중단 감지: {process.ProgramName}");
-
-            process.Status = ProcessStatus.Stopped;
-            process.ProcessId = 0;
-
-            if (process.AutoRestart && (DateTime.Now - process.LastRunTime).TotalSeconds >= process.RestartInterval)
-            {
-                Console.WriteLine($"자동 재시작 시도: {process.ProgramName}");
-                if (StartProcess(process.FilePath))
-                {
-                    process.LastRunTime = DateTime.Now;
-                    Console.WriteLine($"프로세스 {process.ProgramName} 자동 재시작 성공");
-                }
-                else
-                {
-                    Console.WriteLine($"프로세스 {process.ProgramName} 자동 재시작 실패");
-                }
-            }
         }
 
 
