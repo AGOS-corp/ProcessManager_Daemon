@@ -155,6 +155,15 @@ namespace WatchDog_Background.TcpServer
                         Message = added ? "Program added successfully" : "Program addition failed"
                     };
 
+                case 9999: // 강제 종료 테스트
+                    Console.WriteLine("강제 종료 요청 처리 중...");
+                    Environment.Exit(0); // 프로세스 종료
+                    return new ServerResponse
+                    {
+                        Status = "success",
+                        Message = "Server has been forcefully terminated for testing purposes."
+                    };
+
                 default:
                     Console.WriteLine("알 수 없는 명령");
                     return new ServerResponse
@@ -164,5 +173,6 @@ namespace WatchDog_Background.TcpServer
                     };
             }
         }
+
     }
 }
