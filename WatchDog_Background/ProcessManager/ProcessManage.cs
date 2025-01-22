@@ -53,7 +53,8 @@ namespace WatchDog_Background.ProcessManager
                         command = isRunning ? 1 : 0,
                         auto_restart = p.AutoRestart,
                         restart_interval = p.RestartInterval,
-                        start_immediately = p.StartImmediately
+                        start_immediately = p.StartImmediately,
+                        manual_Restart = p.IsManuallyStopped
                     };
                 }).ToList<object>();
             }
@@ -83,7 +84,7 @@ namespace WatchDog_Background.ProcessManager
 
 
         public bool AddProcess(string filePath, string programName, bool autoRestart = false, int restartInterval = 60,
-            bool startImmediately = true)
+            bool startImmediately = true, bool manualRestart = true)
         {
             lock (_watchedProcesses)
             {
@@ -109,7 +110,9 @@ namespace WatchDog_Background.ProcessManager
                     AutoRestart = autoRestart,
                     RestartInterval = restartInterval,
                     LastRunTime = DateTime.MinValue,
-                    StartImmediately = startImmediately
+                    StartImmediately = startImmediately,
+                    IsManuallyStopped = manualRestart
+                    
                 };
 
                 _watchedProcesses.Add(newProcess);
@@ -143,12 +146,19 @@ namespace WatchDog_Background.ProcessManager
                     case 1: // 실행
                         process.IsManuallyStopped = false; // 수동 중지 상태 해제
                         process.RestartInterval = restartInterval;
-                        if (StartProcess(process.FilePath)) return $"{programName} 실행 성공";
+                        if (StartProcess(process.FilePath))
+                        {
+                            SyncProcessesToJson();
+                            return $"{programName} 실행 성공";
+                        }
                         return $"{programName} 실행 실패";
 
                     case 2: // 중지
-                        process.IsManuallyStopped = true; // 수동 중지 상태로 설정
-                        if (StopProcess(process.ProcessId)) return $"{programName} 중지 성공";
+                        if (StopProcess(process.ProcessId))
+                        {
+                            SyncProcessesToJson();
+                            return $"{programName} 중지 성공";
+                        }
                         return $"{programName} 중지 실패";
 
                     case 3: // 삭제
