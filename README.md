@@ -14,7 +14,8 @@
 **요청 (Client → Server):**
 ```json
 {
-    "opcode": 1001
+    "opcode": 1001,
+    "send": true
 }
 ```
 
@@ -25,7 +26,11 @@
     "data": [
         {
             "program_name": "ProgramA",
-            "is_running": true
+            "is_running": true,
+            "command": 1,
+            "auto_restart": true,
+            "restart_interval": 60,
+            "start_immediately": true
         },
         {
             "program_name": "ProgramB",
@@ -66,6 +71,38 @@
 {
     "status": "success",
     "message": "ProgramA started successfully"
+}
+```
+
+---
+
+#### **1-3. 프로그램 리스트 추가**
+- **설명**: 프로그램 리스트에 새 항목을 추가합니다.
+
+| Key               | Description                              |
+|-------------------|------------------------------------------|
+| `opcode`          | `1003`                                   |
+| `filePath`        | 프로그램 실행 주소                        |
+| `auto_restart`    | 자동 재시작 여부 (`true`/`false`)         |
+| `restart_interval`| 재시작 주기 (초)                         |
+| `start_immediately`| 등록 후 바로 실행 여부                  |
+
+**요청 (Client → Server):**
+```json
+{
+    "opcode": 1003,
+    "filePath": "D:\\AgosTest\\AGOS_Execution.exe",
+    "autoRestart": true,
+    "restartInterval": 60,
+    "start_immediately": true
+}
+```
+
+**응답 (Server → Client):**
+```json
+{
+    "status": "success",
+    "message": "프로그램 추가 성공"
 }
 ```
 
@@ -191,10 +228,12 @@
 |---------|-----------------------------|-------------------------------|
 | `1001`  | WatchDog 상태 조회         | 서버의 프로그램 상태 조회     |
 | `1002`  | WatchDog 관리 요청         | 프로그램 실행/중지/삭제 관리 |
+| `1003`  | WatchDog 프로세스 등록    | 프로그램 리스트 등록          |
 | `2001`  | 업데이트 버전 조회         | 서버 설치된 버전 정보 요청    |
 | `2002`  | 업데이트 요청              | 특정 프로그램 업데이트 요청  |
 | `3001`  | 프로그램 설치 요청         | 새로운 프로그램 설치 요청    |
 | `3002`  | 설치 진행 상태 확인        | 특정 설치 상태 확인 요청     |
+| `9999`  | 프로그램 강제 종료        | 프로그램 강제종료 요청     |
 
 ---
 
