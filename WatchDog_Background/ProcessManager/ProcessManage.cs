@@ -64,14 +64,16 @@ namespace WatchDog_Background.ProcessManager
         {
             try
             {
-                if (processId == 0) return false; // 유효하지 않은 ProcessId는 실행 중이 아님
+                if (processId == 0) return false;
+                if (!ProcessExists(processId)) return false; // ✅ 존재 확인 후 실행
 
-                var process = Process.GetProcessById(processId);
-                return !process.HasExited; // 프로세스가 종료되지 않았으면 실행 중
+                using (var process = Process.GetProcessById(processId))
+                {
+                    return !process.HasExited;
+                }
             }
             catch (ArgumentException)
             {
-                // 프로세스가 이미 종료된 경우
                 return false;
             }
             catch (Exception ex)
@@ -81,6 +83,12 @@ namespace WatchDog_Background.ProcessManager
             }
         }
 
+        private bool ProcessExists(int processId)
+        {
+            return Process.GetProcesses().Any(p => p.Id == processId);
+        }
+
+
 
 
         public bool AddProcess(string filePath, string programName, bool autoRestart = false, int restartInterval = 60,
@@ -88,13 +96,9 @@ namespace WatchDog_Background.ProcessManager
         {
             lock (_watchedProcesses)
             {
-                if (!IsValidExecutable(filePath))
-                {
-                    Console.WriteLine($"프로세스 추가 실패: 유효하지 않은 파일 경로 - {filePath}");
-                    return false;
-                }
-
-                if (_watchedProcesses.Any(p => p.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
+                // 중복 항목 제거
+                var existingProcess = _watchedProcesses.FirstOrDefault(p => p.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
+                if (existingProcess != null)
                 {
                     Console.WriteLine($"프로세스 {filePath} 이미 추가됨.");
                     return false;
@@ -112,14 +116,13 @@ namespace WatchDog_Background.ProcessManager
                     LastRunTime = DateTime.MinValue,
                     StartImmediately = startImmediately,
                     IsManuallyStopped = manualRestart
-                    
                 };
 
                 _watchedProcesses.Add(newProcess);
                 Console.WriteLine($"프로세스 추가됨: {filePath}, 이름: {programName}");
                 Console.WriteLine($"현재 프로세스 목록: {_watchedProcesses.Count}개");
 
-                SyncProcessesToJson(); // JSON 파일 동기화
+                SyncProcessesToJson();
 
                 if (startImmediately)
                 {
@@ -130,6 +133,18 @@ namespace WatchDog_Background.ProcessManager
                 return true;
             }
         }
+
+        // 오래된 프로세스를 정리하는 메서드 추가
+        private void CleanupWatchedProcesses()
+        {
+            lock (_watchedProcesses)
+            {
+                int beforeCount = _watchedProcesses.Count;
+                _watchedProcesses.RemoveAll(p => p.ProcessId == 0); // 종료된 프로세스 제거
+                Console.WriteLine($"정리 완료. 삭제된 프로세스 개수: {beforeCount - _watchedProcesses.Count}");
+            }
+        }
+
 
 
 
@@ -410,7 +425,7 @@ namespace WatchDog_Background.ProcessManager
                             _semaphore.Release();
                         }
 
-                        await Task.Delay(1000); // 0.1초 대기
+                        await Task.Delay(2000); // 0.1초 대기
                     }
                 }
             }
@@ -460,10 +475,21 @@ namespace WatchDog_Background.ProcessManager
         /// <returns>ManagementObject 또는 null</returns>
         private ManagementObject FindMatchingProcess(string filePath)
         {
-            return _oWmiCollection.Cast<ManagementObject>()
-                .FirstOrDefault(obj =>
-                    obj["ExecutablePath"]?.ToString().Equals(filePath, StringComparison.OrdinalIgnoreCase) == true);
+            if (_oWmiCollection == null) return null;
+
+            foreach (ManagementObject obj in _oWmiCollection)
+            {
+                using (obj) // ✅ 기존 객체는 해제
+                {
+                    if (obj["ExecutablePath"]?.ToString().Equals(filePath, StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        return (ManagementObject)obj.Clone(); // ✅ 새 객체 반환
+                    }
+                }
+            }
+            return null;
         }
+
 
         /// <summary>
         ///     실행 중인 프로세스 정보를 업데이트
